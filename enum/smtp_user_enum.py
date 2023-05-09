@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 import socket
 import os
@@ -44,14 +44,47 @@ class SMTP_enum(object):
     def guess_users(self, wordlist: str):
         if not os.path.exists(wordlist):
             raise ValueError(f"Wordlist {wordlist} does not exists")
-        if not "VRFY" in self.smtp_options:
-            print(Fore.RED +"[-] Impossible to retrieve users from host"+Style.RESET_ALL)
-        else:
-            print(Fore.GREEN +"[+] Let's starts grabbing some users !"+Style.RESET_ALL)
+        if "VRFY" in self.smtp_options:
+            print(Fore.GREEN +"[+] Let's starts grabbing some users with VRFY option !"+Style.RESET_ALL)
             with open(wordlist, 'r') as f:
                 lines = f.readlines()
             for user in lines:
                 self.verify_user(username=user.strip())
+        else:
+            print(Fore.GREEN +"[+] Let's starts grabbing some users by crafting mail RCP TO: !"+Style.RESET_ALL)
+            try:
+                message = b"MAIL FROM:<> "+b'\r\n'
+                self.sock.send(message)
+                infos = self.sock.recv(self.buffer)
+                if "OK" in infos.decode():
+                    with open(wordlist, 'r') as f:
+                        lines = f.readlines()
+                    for user in lines:
+                        self.verify_rcpt_user(username=user.strip())
+            except Exception as e:
+                print(Fore.RED +"[-] Impossible to find valid users from host :("+Style.RESET_ALL)
+                raise e
+
+    def verify_rcpt_user(self, username):
+        if username.strip():
+            try:
+                message = b"RCPT TO:"+username.encode()+b'\r\n'
+                # print(message)
+                self.sock.send(message)
+                infos = self.sock.recv(self.buffer)
+                # print(infos)
+            #handle connection error and reconnect to SMTP service
+            except ConnectionResetError as e:
+                self.sock.close()
+                self.sock = None
+                self.connect_to_host()
+                self.grab_banner(verbose=False)
+                self.sock.send(message)
+                infos  = self.sock.recv(self.buffer)
+            finally:
+                if "250" in infos.decode() or "OK" in infos.decode():
+                    print(Fore.GREEN +"[+] Found user : "+Style.RESET_ALL+Fore.YELLOW +username+Style.RESET_ALL)
+                    self.users.append(username)
 
     def verify_user(self, username):
         message = b"VRFY "+username.encode()+b'\r\n'
